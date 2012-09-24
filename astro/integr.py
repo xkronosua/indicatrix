@@ -39,7 +39,7 @@ if __name__ == "__main__":
 				#ii = i[:-10] + "b" + i[-10:]	
 				b = pf.getdata(ii)
 				#print b
-				res = (s-b).sum()
+				res = abs((s-b)).sum()
 				temp = i.split("/")[-1].split('.fits')[0].split("_")
 				#print temp
 				angle = float(temp[-3]) + float(temp[-2])/60.
@@ -48,6 +48,7 @@ if __name__ == "__main__":
 				
 				
 				print ("warning: \t%s\t%s" % (i, ii))
-				
-		sp.savetxt( os.path.join(options.dir,options.out), sp.array(out) )
+		out = sp.array(out)
+		out = out[ out[:,0].argsort() ]
+		sp.savetxt( os.path.join(options.dir,options.out), out)
 		
