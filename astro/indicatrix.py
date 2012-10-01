@@ -40,14 +40,18 @@ def getFilters(file="./filters.csv", length="532"):
 def getJournal(file):
 	data = sp.loadtxt(file,dtype="S")
 	base_angle = data[0,0]
+	base_filt = data[0,2]
 	out = []
+	
 	for i in data:
 		# Якщо кути в таблиці вводяться лише раз для групи мінут
 		if i[0] == "":
-			out.append([base_angel + "_" + i[1], i[2]])
-		else: 
-			base_angle = i[0]
-			out.append([i[0] + "_" + i[1], i[2]])
+			i[0] = base_angle
+		else: base_angle = i[0]
+		if i[2] == "": 
+			i[2] = base_filt
+		else: base_filt = i[2]
+		out.append([i[0] + "_" + i[1], i[2]])
 	return out
 
 # Перерахунок для різних комбінацій фільтрів
@@ -69,13 +73,13 @@ def getData(dir):
 		
 		for angle_name, filt in journal:
 			
-			pName, bpName = '', ''
+			pName, bpName = ['']*2
 			
 			for root, file in names:
 				ang = file.split("_")
-				if ang[0] + "_" + ang[1] == angle_name:
+				if ang[0] + "_" + ang[1] == angle_name or  ang[0] + "_" + ang[1] == angle_name + "0":
 					pName = os.path.join(root, file)
-				elif ang[0] + "_" + ang[1] == angle_name+"b":
+				elif ang[0] + "_" + ang[1] == angle_name+"b" or  ang[0] + "_" + ang[1] == angle_name+"0b":
 					bpName = os.path.join(root, file)
 				else: pass
 				
@@ -86,8 +90,12 @@ def getData(dir):
 				angle = float(ang[0]) + float(ang[1]) / 60.
 				out.append([ angle, abs(p-bp).sum() / resFilters(filt, filtersDict) ])
 			except IOError:	# Якщо запису в журналі не відповідають файли, то він не враховується 
-				print("warning:	- ", i, pName, bpName) 
-		return sp.array(out)
+				print("\033[1;31mWarning:	- "+  pName +" | " + bpName + "|" + angle_name + '\033[1;m') 
+		out = sp.array(out)
+		out[:,0] = out[:,0]-(out[:,0]>180)*360
+		print("Len:\n\tjournal = " + str(len(journal)) + "\tout = " + str(len(out)))
+		return out
+		
 	else:
 		print("Dir_error")
 
