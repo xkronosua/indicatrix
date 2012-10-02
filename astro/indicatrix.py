@@ -5,7 +5,7 @@ from optparse import OptionParser
 import os
 import pyfits as pf
 import scipy as sp
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 """##############OPTIONS###############"""
 
@@ -38,8 +38,13 @@ def getFilters(file="./filters.csv", length="532"):
 	return dict( zip(filt[1:,0], sp.array(filt[1:,col],dtype="f") ) )
 # Читання журналу
 def getJournal(file):
-	data = sp.loadtxt(file,dtype="S")
-	base_angle = data[0,0]
+	base_angle, base_filt = ['']*2
+	try:
+		data = sp.loadtxt(file,dtype="S")
+		base_angle = data[0,0]
+	except IndexError:
+		data = sp.loadtxt(file,dtype="S",delimiter=',')
+		base_angle = data[0,0]
 	base_filt = data[0,2]
 	out = []
 	
