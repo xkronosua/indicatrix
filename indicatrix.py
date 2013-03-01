@@ -97,7 +97,7 @@ def getData(dir):
 			except IOError and ValueError:	# Якщо запису в журналі не відповідають файли, то він не враховується 
 				print("\033[1;31mWarning:	- "+  pName +" | " + bpName + "|" + angle_name + '\033[1;m') 
 		out = sp.array(out)
-		out[:,0] = out[:,0]-(out[:,0]>180)*360
+		#out[:,0] = out[:,0]-(out[:,0]>180)*360
 		print("Len:\n\tjournal = " + str(len(journal)) + "\tout = " + str(len(out)))
 		return out
 		

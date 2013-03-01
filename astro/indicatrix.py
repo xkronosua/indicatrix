@@ -94,10 +94,10 @@ def getData(dir):
 				ang = angle_name.split("_")
 				angle = float(ang[0]) + float(ang[1]) / 60.
 				out.append([ angle, abs(p-bp).sum() / resFilters(filt, filtersDict) ])
-			except IOError:	# Якщо запису в журналі не відповідають файли, то він не враховується 
+			except IOError and ValueError:	# Якщо запису в журналі не відповідають файли, то він не враховується 
 				print("\033[1;31mWarning:	- "+  pName +" | " + bpName + "|" + angle_name + '\033[1;m') 
 		out = sp.array(out)
-		out[:,0] = out[:,0]-(out[:,0]>180)*360
+		#out[:,0] = out[:,0]-(out[:,0]>180)*360
 		print("Len:\n\tjournal = " + str(len(journal)) + "\tout = " + str(len(out)))
 		return out
 		
