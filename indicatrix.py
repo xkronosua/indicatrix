@@ -5,6 +5,8 @@ from optparse import OptionParser
 import os
 import pyfits as pf
 import scipy as sp
+import glob
+
 #import matplotlib.pyplot as plt
 
 """##############OPTIONS###############"""
@@ -26,6 +28,11 @@ parser.add_option("-j","--journal", dest="journal", help="set journal file", act
 parser.add_option("-d","--dir", dest="dir", help="set input dir", action='store')
 parser.add_option("-o","--out", dest="outFile", help="set output file", action='store', default="res.dat")
 
+parser.add_option("-b","--background", dest="background", help="set background for all files", action='store', default='')
+parser.add_option("-z","--zero", dest="zero", help="move start", action="store_true")
+parser.add_option("-p","--plot", dest="plot", help="plot data", action="store_true")
+
+
 
 (options, args) = parser.parse_args()
 
@@ -41,11 +48,12 @@ def getJournal(file):
 	base_angle, base_filt = ['']*2
 	try:
 		data = sp.loadtxt(file,dtype="S")
+	#	print data
 		base_angle = data[0,0]
-	except IndexError:
+	except (IndexError,ValueError):
 		data = sp.loadtxt(file,dtype="S",delimiter=',')
 		base_angle = data[0,0]
-	base_filt = data[0,2]
+		base_filt = data[0,2]
 	out = []
 	
 	for i in data:
@@ -68,6 +76,7 @@ def getData(dir):
 	journal = getJournal(options.journal)
 	out = []
 	if os.path.exists(dir):
+		#os.mkdir(os.path.join(dir,'img'))
 		filtersDict = getFilters(options.FILTERS, options.LENGTH)
 		names = []
 		for root, dirs, files in os.walk(options.dir):
@@ -81,9 +90,12 @@ def getData(dir):
 			pName, bpName = ['']*2
 			
 			for root, file in names:
-				ang = file.split("_")
+				dir = os.path.basename(root) #----
+				ang = dir.split("_")
 				if ang[0] + "_" + ang[1] == angle_name or  ang[0] + "_" + ang[1] == angle_name + "0":
 					pName = os.path.join(root, file)
+				elif options.background:
+					bpName = options.background
 				elif ang[0] + "_" + ang[1] == angle_name+"b" or  ang[0] + "_" + ang[1] == angle_name+"0b":
 					bpName = os.path.join(root, file)
 				else: pass
@@ -93,11 +105,18 @@ def getData(dir):
 				bp = pf.getdata(bpName)
 				ang = angle_name.split("_")
 				angle = float(ang[0]) + float(ang[1]) / 60.
-				out.append([ angle, abs(p-bp).sum() / resFilters(filt, filtersDict) ])
-			except IOError and ValueError:	# Якщо запису в журналі не відповідають файли, то він не враховується 
+				filt = resFilters(filt, filtersDict)
+				if not options.plot is None:
+					tmpName = os.path.split(pName)[0] + '/' + str(round(angle,3)) + '.dat'
+					print tmpName
+					sp.savetxt(tmpName, (p-bp)/filt)
+					os.system('sh ./plotmap.sh ' + tmpName)
+					os.remove(tmpName)
+				out.append([ angle, abs(p-bp).sum() /filt ])
+			except (IOError, ValueError, IndexError):	# Якщо запису в журналі не відповідають файли, то він не враховується 
 				print("\033[1;31mWarning:	- "+  pName +" | " + bpName + "|" + angle_name + '\033[1;m') 
 		out = sp.array(out)
-		#out[:,0] = out[:,0]-(out[:,0]>180)*360
+		if len(out)>=1 and not options.zero is None: out[:,0] = out[:,0]-(out[:,0]>180)*360
 		print("Len:\n\tjournal = " + str(len(journal)) + "\tout = " + str(len(out)))
 		return out
 		
