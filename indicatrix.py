@@ -45,7 +45,7 @@ parser.add_option("-p","--plot", dest="plot", help="plot data", action="store_tr
 (options, args) = parser.parse_args()
 
 print options, args
-
+#################################################################
 # Знайдемо кут, що захоплює матриця
 MATRIX_SIZE = [494.*7.4*10**-4, 659.*7.4*10**-4]	# см
 theta = sp.degrees( sp.arctan(MATRIX_SIZE[1]/2./options.DIST))
