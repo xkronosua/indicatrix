@@ -93,7 +93,7 @@ def getJournal(file):
 		if i[2] == "": 
 			i[2] = base_filt
 		else: base_filt = i[2]
-		out.append([int(i[0]), int(i[1]), i[2]])
+		out.append([int(i[0]), int(i[1]), base_filt])
 	return out
 
 # Перерахунок для різних комбінацій фільтрів
@@ -144,6 +144,14 @@ def getData(Dir):
 					errList.append(pName)
 					continue
 			
+			f = pf.open(pPath, mode='update')
+			print pPath, f[0].header
+			f[0].header.update('FILTER',filt)
+			#h.update({})
+			print filt#, dir(h)
+			f.flush()
+			#except : print "err"
+			'''
 			# Читаємо знімки 
 			try:
 				p = pf.getdata(pPath)
@@ -184,14 +192,20 @@ def getData(Dir):
 				
 				
 			except (IOError):	# Якщо запису в журналі не відповідають файли, то він не враховується 
+				pass
+				
 				txt = "\033[1;31mWarning:	- "+  pPath +" | " + bpPath + "|" + str(degrees) + "_" + str(minutes) + '\033[1;m'
 				errList.append(txt)
 				print txt
+				
+			'''
+		'''
 		out = sp.array(out)
 		if len(out)>=1 and not options.zero is None: out[:,0] = out[:,0]-(out[:,0]>180)*360
 		print errList,"\nLen:\n\tjournal = " + str(len(journal)) + "\tout = " + str(len(out))
 		if options.average and len(theta_range)>1:
 			out = average(out, options.average*(theta_range[1] - theta_range[0]))
+		'''
 		return out
 		
 	else:

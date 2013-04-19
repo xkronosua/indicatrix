@@ -15,17 +15,21 @@
 #EOF
 
 #!/bin/sh
+filename=$(basename "$1")
+name="${filename%%.*}"
 gnuplot -persist << EOF
 set view map
 unset sur
 unset key
+unset tics
+set cbtics
 set pm3d at b
 set palette positive nops_allcF maxcolors 0 gamma 0.8 gray
-set title "$1"
+set title "$name"
 #set terminal postscript
 #set ountput "$1.ps"
 set terminal gif 
 #color enhanced
-set output "$1.gif"
+set output "$1.jpg"
 splot "$1" matrix
 EOF

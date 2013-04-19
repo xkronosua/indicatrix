@@ -9,6 +9,7 @@ import glob
 import re
 from scipy.signal import medfilt2d
 import json
+import traceback
 #import matplotlib.pyplot as plt
 
 """##############OPTIONS###############"""
@@ -18,17 +19,20 @@ usage = "usage: %prog {[options] args}"
 parser = OptionParser(usage=usage)
 
 parser.add_option("-f", "--filt", dest="FILTERS", help="set filters table file",\
-	action='store', default="./filters.csv")
+	action='store', default="./filters.dict")
 
-parser.add_option("-l", "--length", dest="LENGTH", help="set wave length",\
+parser.add_option("-l", "--length", dest="LENGTH", help=u"set wave length",\
 	action='store', default="532")
 
 
 parser.add_option("-D", "--distance", dest="DIST", help="set sample-matrix distance, cm",\
-	action='store', default="23", type='int')
+	action='store', default="23", type='float')
 
 parser.add_option("-N", dest="N", help="set stripes num",\
 	action='store', default="1", type='int')
+
+parser.add_option("-s", dest="slice", help="cut subrect ",\
+	action='store', default="")
 
 parser.add_option("-A", '--averaging', dest="average", help="set averaging param",\
 	action='store', default="0", type='float')
@@ -45,6 +49,7 @@ parser.add_option("-b","--background", dest="background", help="set background f
 parser.add_option("--bFilt", dest="bFilt", help="set background`s filter ", action='store', default='')
 parser.add_option("-z","--zero", dest="zero", help="move start", action="store_true")
 parser.add_option("-p","--plot", dest="plot", help="plot data", action="store_true")
+parser.add_option("-P","--panorama", dest="panorama", help="create panorama", action="store_true")
 parser.add_option("-m","--medfilt", dest="medfilt", help="use median filter", action="store_true")
 
 
@@ -64,8 +69,117 @@ if N == 1:
 else:
 	theta_range = sp.linspace(-theta, theta, N)
 
-print theta_range
+#print theta_range
 
+
+def filtCalc(filters, filtTable=None):
+	if filters:
+		if not filtTable is None:
+			filters = filters.replace(' ', '').replace('+', ',').replace(';', ',')
+			res = 1.
+			try:
+				res = sp.multiply.reduce( [ filtTable[options.LENGTH][i.upper()] for i in filters.split(",")] )
+			except KeyError:
+				res = 1.
+			return res
+		else:
+			return	
+	else:
+		return 1.
+
+def getData(Dir, bgfile=''):
+	if os.path.exists(Dir):
+		filtTable = json.load(open(options.FILTERS))
+		
+		# background
+		bgData = 1.
+		if bgfile:
+			background = pf.open(glob.glob(bgfile)[0])[0]
+			bgData = background.data
+			if 'FILTER' in  background.header.keys():
+				bgFilt = filtCalc(background.header['FILTER'], filtTable)
+			else:
+				bgFilt = 1.
+			bgData = bgData / bgFilt
+		else:
+			pass
+		#if options.medfilt:
+		#	bgData = medfilt2d(bgData)
+
+		fileList = glob.glob(os.path.join(Dir,"*",'*.fits'))
+		out = []
+		for f in fileList:
+			profData = None
+			try:
+				prof = pf.open(f)
+				profData = prof[0].data
+				if 'FILTER' in prof[0].header.keys():
+					profFilt = filtCalc(prof[0].header['FILTER'], filtTable)
+				else:
+					profFilt = 1.
+				profName = prof[0].header['OBJECT']
+				profData = profData / profFilt
+			except (IOError, ValueError, IndexError):
+				traceback.print_exc()
+				continue
+
+			
+			try:
+				degrees, minutes = profName.split('_')
+				angle = float(degrees) + float(minutes) / 60.
+			except ValueError:
+				traceback.print_exc()
+				continue
+			t = angle + theta_range
+			
+			signal = profData - bgData
+			signal = signal - signal*(signal<0)
+			# medfilt
+			if options.medfilt:
+				signal = medfilt2d(signal)
+			if options.slice:
+				try:
+					size = [ int(i) for i in options.slice.split('x')]
+					#s = sp.shape(size)
+					signal = signal[size[0]:-size[0], size[1]:-size[1]]
+				except:
+					traceback.print_exc()
+
+			stripes = sp.array_split(signal, N, axis=1)
+			
+			if options.panorama:
+				for i in range(len(stripes)):
+					out.append([t[i]]+stripes[::-1][i].T.tolist()[0])
+			else:
+				print sp.shape(stripes[0]), sp.shape(signal)
+				res = [ sp.mean([a.max(), a.mean()]) for a in stripes[::-1]]
+				print len(res)
+				for i in range(len(res)):
+					out.append([t[i], res[i]]) 
+				
+			# Конвертація в gif
+			if options.plot:
+				imgDir = os.path.join(Dir,"img")
+				if not os.path.exists(imgDir):
+					os.mkdir(imgDir)
+				tmpName = os.path.join(Dir,"img", str(degrees) + "_" + str(minutes) + ".dat")
+				print tmpName, sp.shape(signal)
+				#print ">>>>", signal
+				sp.savetxt(tmpName, signal)
+				os.system('sh ./plotmap.sh ' + tmpName)
+				os.remove(tmpName)
+			
+	#print out[0]
+	out = sp.array(out)
+	if len(out)>=1 and not options.zero is None: out[:,0] = out[:,0]-(out[:,0]>180)*360
+	#print errList,"\nLen:\n\tjournal = " + str(len(journal)) + "\tout = " + str(len(out))
+	#if options.average and len(theta_range)>1:
+	#	out = average(out, options.average*(theta_range[1] - theta_range[0]))
+	#if options.panorama:
+
+	return out
+
+'''
 # Читання таблиці фільтрів та вибір значень для даної довжини хвилі
 def getFilters(file="./filters.csv", length="532"):
 	filt = sp.loadtxt(file, dtype="S")
@@ -197,15 +311,10 @@ def getData(Dir):
 	else:
 		print("Dir_error")
 
-
-def getData2(inDir, bgfile):
-	if os.path.exists(inDir):
-		fileList = glob.glob(os.path.join(Dir,"*",'*.' + options.TYPE))
-		background = pf.open(bgfile)
-		bgData = background[0].data
-		bgFilt = background[0].header['FILTER']
+'''
 
 
+'''
 def average(data, step):
 	data = data[data[:,0].argsort()]
 	x = data[:,0]
@@ -222,11 +331,11 @@ def average(data, step):
 		start = end; end += step
 		t = (start < x.max())
 	return sp.array([x_new,y_new]).T
-	
+'''
 if __name__ == "__main__":
 	#(options,args) = parser.parse_args()
 	out = getData(options.dir)
 	print out
-	print theta_range
+	print theta_range[-1]-theta_range[0]
 	
 	sp.savetxt(os.path.join(options.dir,options.outFile),out)
