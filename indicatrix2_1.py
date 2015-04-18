@@ -49,7 +49,7 @@ parser.add_option("-f", "--filt", dest="FILTERS", help="set filters table file",
 	action='store', default="./filters.dict")
 
 parser.add_option("-l", "--length", dest="LENGTH", help=u"set wave length",\
-	action='store', default="532")
+	action='store', default="1064")
 
 
 parser.add_option("-D", "--distance", dest="DIST", help="set sample-matrix distance, cm",\
@@ -74,6 +74,7 @@ parser.add_option("-o","--out", dest="outFile", help="set output file", action='
 
 parser.add_option("-b","--background", dest="background", help="set background for all files", action='store', default='')
 parser.add_option("--bInterp", dest="bInterp", help="interpolate background`s", action='store_true')
+parser.add_option("--bDict", dest="bDict", help="create background`s dict[angle]", action='store_true')
 
 parser.add_option("--bFilt", dest="bFilt", help="set background`s filter ", action='store', default='')
 parser.add_option("-z","--zero", dest="zero", help="move start", action="store_true")
@@ -82,7 +83,8 @@ parser.add_option("-P","--panorama", dest="panorama", help="create panorama", ac
 parser.add_option("-m","--medfilt", dest="medfilt", help="use median filter", default=0, type='int', action="store")
 parser.add_option("-g","--gaussfilt", dest="gaussfilt", help="use gauss filter", default='1x1', action="store")
 parser.add_option("--bounds", dest="bounds", help="cut min and max", default='x', action="store")
-
+parser.add_option("--power", dest="power", help="P_out", default=1., type='float', action="store")
+parser.add_option("--fc", dest="fc", help="fsdfsdf", default=1., type='float', action="store")
 
 (options, args) = parser.parse_args()
 
@@ -109,11 +111,12 @@ def cut_minmax(data, bounds):
 def filtCalc(filters, filtTable=None):
 	if filters:
 		if not filtTable is None:
-			filters = filters.replace(' ', '').replace('+', ',').replace(';', ',').replace('.', ',')
+			filters = filters.replace(' ', '').replace(' ', '').replace('+', ',').replace(';', ',').replace('.', ',')
 			res = 1.
 			try:
-				res = sp.multiply.reduce( [ filtTable[options.LENGTH][i.upper()] for i in filters.split(",")] )
+				res = sp.multiply.reduce( [ filtTable[options.LENGTH][i.upper()] for i in filters.split(",")] ) 
 			except KeyError:
+				traceback.print_exc()
 				res = 1.
 			return res
 		else:
@@ -138,6 +141,7 @@ def getData(Dir, theta_range, bgfile=''):
 		
 		# background
 		bgData = 1.
+		bDict = {}
 		bOut = []
 		data = []
 		if bgfile:
@@ -156,14 +160,37 @@ def getData(Dir, theta_range, bgfile=''):
 					data = data / bgFilt
 					bname = background.header['OBJECT']
 					print(bname)
-					angle = float(bname[1:])
+					angle = float(bname.split("_")[0])
 					bOut.append([angle, data.mean()])
 				bOut = sp.array(bOut)
 				bOut = bOut[bOut[:,0].argsort()]
 				plt.plot(bOut[:,0],bOut[:,1])
 				plt.show(False)
 				bgData = sp.poly1d(sp.polyfit(bOut[:,0],bOut[:,1], 5))
-
+			elif options.bDict:
+				backgrounds = glob.glob(bgfile)
+				
+				print(backgrounds)
+				for i in backgrounds:
+					print(i)
+					background = pf.open(i)[0]
+					data = background.data
+					print( sp.shape(data))
+					if 'FILTER' in  background.header.keys():
+						bgFilt = filtCalc(background.header['FILTER'], filtTable)
+					else:
+						print(background.header.keys())
+						bgFilt = 1.
+					data = data / bgFilt
+					bname = background.header['OBJECT']
+					print(bname, bgFilt)
+					angle = float(bname[:].split('_')[0])
+					if options.zero:
+						angle -= (angle>180)*360
+					bOut.append([angle, data.mean()])
+					bDict[angle] = data
+				bOut = sp.array(bOut)
+				bOut = bOut[bOut[:,0].argsort()]
 			else:
 				background = pf.open(glob.glob(bgfile)[0])[0]
 				data = background.data
@@ -179,7 +206,7 @@ def getData(Dir, theta_range, bgfile=''):
 		sh = sp.shape(data)
 		#if options.medfilt:
 		#	bgData = medfilt2d(bgData)
-		print(bgData)
+		#print(bgData)
 
 		fileList = glob.glob(os.path.join(Dir,"*",'*.fits'))
 		out = []
@@ -192,13 +219,14 @@ def getData(Dir, theta_range, bgfile=''):
 				prof = pf.open(f)
 				profData = prof[-1].data
 				if 'FILTER' in prof[-1].header.keys():
-					print prof[-1].header['FILTER']
+					print "\033[1;41m", prof[-1].header['FILTER'], "\033[1;m"
 					profFilt = filtCalc(prof[-1].header['FILTER'], filtTable)
 				else:
 					profFilt = 1.
 				profName = prof[-1].header['OBJECT']
 				
 				profData = cut_minmax(profData, bounds)
+
 
 				profData = profData / profFilt
 			except (IOError, ValueError, IndexError):
@@ -227,7 +255,22 @@ def getData(Dir, theta_range, bgfile=''):
 					print(sp.mean(bOut[:,1]), type(bOut))
 					print( angle, bOut[:,0])
 					try:
-						signal = abs(profData - sp.mean(bOut[:,1]))
+						signal = profData - sp.mean(bOut[:,1])
+					except:
+						traceback.print_exc()
+					print(signal.min())
+			elif options.bDict:
+				try:
+					
+					signal = abs(profData - bDict[angle])
+					print(signal.min())
+					print("="*20)
+				except:
+					traceback.print_exc()
+					print(angle)
+					
+					try:
+						signal = profData - sp.mean(bOut[:,1])
 					except:
 						traceback.print_exc()
 					print(signal.min())
@@ -235,7 +278,8 @@ def getData(Dir, theta_range, bgfile=''):
 				signal = profData - bgData.mean()
 
 			#signal = signal * ( ( signal - signal.min() ) > ( signal.max()-signal.min() )/100 )
-			# medfilt
+			signal /= options.power
+
 			gf = [ int(i) for i in options.gaussfilt.split('x')]
 			signal = ndimage.gaussian_filter(signal, gf)
 
@@ -245,30 +289,32 @@ def getData(Dir, theta_range, bgfile=''):
 			if options.panorama:
 				theta_range = sp.linspace(-theta, theta, sp.shape(signal)[1])
 			t = angle + theta_range[::-1]
-			'''
+			
 			if options.slice:
 				try:
 					size = [ int(i) for i in options.slice.split('x')]
 					#s = sp.shape(size)
 					signal = signal[size[0]:-size[0], size[1]:-size[1]]
+					t = t[size[1]:-size[1]]
+					sh = (sh[0]-2*size[0], sh[1]-2*size[1])
 				except:
 					traceback.print_exc()
-			'''
 			
+			#print(sh, signal.shape)
 			
-			if options.panorama and sh == sp.shape(signal):
+			#if options.panorama and sh == sp.shape(signal):
 				#N = sp.shape(signal)[1]
 				#stripes = sp.array_split(signal, N, axis=1)
 				#for i in range(len(stripes)):
 				#	out.append([t[i]]+stripes[::-1][i].T.tolist()[0])
-				tt = sp.vstack((t,signal)).T
-				print(sp.shape(tt))
+			tt = sp.vstack((t,signal)).T
+			print(sp.shape(tt),)
 				
-				out.append(tt)
+			out.append(tt)
 					#sh.append(sp.shape(tt))
-			else:
-				print('?????')
-				'''
+			#	else:
+			#		print('?????')
+			'''
 				stripes = sp.array_split(signal, N, axis=1)
 				print sp.shape(stripes[0]), sp.shape(signal)
 				res = [ a.mean() for a in stripes[::-1]]
@@ -298,7 +344,7 @@ def getData(Dir, theta_range, bgfile=''):
 	else:
 		out = sp.array(out)
 	#out = out.astype('int64')
-	if len(out)>=1 and not options.zero: out[:,0] = out[:,0]-(out[:,0]>180)*360
+	if len(out)>=1 and not options.zero: out[:,0] = out[:,0]+(out[:,0]<180)*360
 	#print errList,"\nLen:\n\tjournal = " + str(len(journal)) + "\tout = " + str(len(out))
 	#if options.average and len(theta_range)>1:
 	#	out = average(out, options.average*(theta_range[1] - theta_range[0]))
@@ -324,12 +370,12 @@ if __name__ == "__main__":
 	A, step = getData(options.dir, theta_range, options.background)
 	print(sp.shape(A))
 	print theta_range[-1]-theta_range[0]
-	print theta_range
+	#print theta_range
 	#step = theta_range[1] - theta_range[0]
 	#sp.savetxt(os.path.join(options.dir,options.outFile),A)
 	if options.panorama:
 		A = A[A[:,0].argsort()]
-		#A = A[sp.unique(A[:,0],return_index=True)[1]]
+		A = A[sp.unique(A[:,0],return_index=True)[1]]
 		x=A[:,0]
 		
 		z=A[:,41:-41]#.astype('int32')
@@ -351,22 +397,38 @@ if __name__ == "__main__":
 		#		z_new2D.append( z[w].mean(axis=0))
 		#	else: z_new2D.append(z[w])
 		#Z_new2D = sp.array(z_new2D)
-
-
-		Z_new2D=scipy.interpolate.RectBivariateSpline(x,y,z.round(0), kx=4, ky=5, s=0)(x2,y)
+		xmax = x.max()
+		ymax = y.max()
+		zmax = z.max()
+		x /= xmax
+		y /= ymax
+		z /= zmax
+		try:
+			
+			Z_new2D = scipy.interpolate.RectBivariateSpline(x, y, z, kx=5, ky=5, s=0)(x2/xmax,y/ymax)
+		except:
+			traceback.print_exc()
+			Z_new2D = z
+		Z_new2D *= zmax
+		x *= xmax
+		y *= ymax 
+		z *= zmax
 		#matshow(Z_new)
 		#matshow(Z_new.T)
 		#matshow(Z_new.T, cmap = cm.Greys_r)
 
 		out = scipy.array([x,z[:,w]]).T
 		print scipy.shape(out)
-		sp.save(os.path.join(options.dir,options.outFile),scipy.array([x,z[:,w]]).T)#Z_new.T.round(0))
-		sp.save(os.path.join(options.dir,options.outFile+'2D'),Z_new2D.T.round(0))
-		sp.save(os.path.join(options.dir,options.outFile+'x'),x)
-		sp.save(os.path.join(options.dir,options.outFile+'y'),y)
-		sp.save(os.path.join(options.dir,options.outFile+'z'),z)
+		sp.save(os.path.join(options.dir,options.outFile),scipy.array([x, ndimage.gaussian_filter( z,(7,7))[:,w]]).T)#Z_new.T.round(0))
+		try:
+			sp.save(os.path.join(options.dir,options.outFile+'2D'),Z_new2D.T.round(0))
+			sp.save(os.path.join(options.dir,options.outFile+'x'),x)
+			sp.save(os.path.join(options.dir,options.outFile+'y'),y)
+			sp.save(os.path.join(options.dir,options.outFile+'z'),z)
 
-		tmp = z
+			tmp = z
+		except:
+			pass
 		'''
 		Z_new=abs(Z_new)+1.
 		z_new=sp.log10(Z_new)
