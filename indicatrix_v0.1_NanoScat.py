@@ -85,6 +85,9 @@ parser.add_option("-g", "--gaussfilt", dest="gaussfilt", help="use gauss filter"
 parser.add_option("--bounds", dest="bounds", help="cut min and max", default='x', action="store")
 parser.add_option("--power", dest="power", help="P_out", default=-1., type='float', action="store")
 parser.add_option("-e", "--exposure", dest="exposure", help="exposure value. -1 for auto", default=-1, type='float', action="store")
+parser.add_option("--auto_diff", dest="auto_diff", help="Diff with background", action="store_true")
+
+
 
 (options, args) = parser.parse_args()
 
@@ -158,15 +161,13 @@ def getData(Dir, theta_range, bgfile=''):
 					else:
 						bgFilt = 1.
 					data = data / bgFilt
+
 					if options.exposure != -1:
 						data /= float(options.exposure)*1000
 					else :
 						data /= float(background.header['EXPTIME'])*1000
 			
-					if options.power != -1:
-						data /= float(options.power)
-					else :
-						data /= float(background.header['POWER'])
+					
 					bname = background.header['OBJECT']
 					print(bname, i)
 					try:
@@ -178,9 +179,11 @@ def getData(Dir, theta_range, bgfile=''):
 				bOut = sp.array(bOut)
 				bOut = bOut[bOut[:,0].argsort()]
 				#bOut[:,0] = bOut[:,0][::-1]
-				plt.plot(bOut[:,0],bOut[:,1])
+				plt.plot(bOut[:,0],bOut[:,1],'xg')
+				
+				bgData = interp.interp1d(bOut[:,0],bOut[:,1])#sp.poly1d(sp.polyfit(bOut[:,0],bOut[:,1], 60))
+				plt.plot(bOut[:,0],bgData(bOut[:,0]),'r')
 				plt.show(False)
-				bgData = sp.poly1d(sp.polyfit(bOut[:,0],bOut[:,1], 5))
 			elif options.bDict:
 				backgrounds = glob.glob(bgfile)
 				
@@ -227,10 +230,6 @@ def getData(Dir, theta_range, bgfile=''):
 				else :
 					bgData /= float(background.header['EXPTIME'])*1000
 			
-				if options.power != -1:
-					bgData /= float(options.power)
-				else :
-					bgData /= float(background.header['POWER'])
 				
 		else:
 			print('No BG')
@@ -239,7 +238,8 @@ def getData(Dir, theta_range, bgfile=''):
 		#if options.medfilt:
 		#	bgData = medfilt2d(bgData)
 		#print(bgData)
-
+		bOut[:,1] /= options.power
+		sp.savetxt(os.path.join(Dir,"Bg.dat"),bOut)
 		fileList = glob.glob(os.path.join(Dir,"*",'*.fits'))
 		out = []
 		sort_nicely(fileList)
@@ -271,12 +271,20 @@ def getData(Dir, theta_range, bgfile=''):
 				if options.exposure != -1:
 					profData /= float(options.exposure)*1000
 				else :
-					profData /= float(prof[-1].header['EXPTIME'])*1000
-				
+					try:
+						profData /= float(prof[-1].header['EXPTIME'])*1000
+					except KeyError:
+						try:
+							profData /= float(prof[-1].header['EXPOSURE'])*1000
+						except:
+							traceback.print_exc()
+							print(f,"<<<<---")
+				'''
 				if options.power != -1:
 					profData /= float(options.power)
 				else :
 					profData /= float(prof[-1].header['POWER'])
+				'''
 					
 			except (IOError, ValueError, IndexError):
 				traceback.print_exc()
@@ -291,40 +299,46 @@ def getData(Dir, theta_range, bgfile=''):
 				continue
 			'''
 			
-			signal = []
-			if options.bInterp:
-				try:
-					
-					signal = profData - bgData(angle)
-					print(signal.min())
-					print("="*20)
-				except:
-					traceback.print_exc()
-					print(angle)
-					print(sp.mean(bOut[:,1]), type(bOut))
-					print( angle, bOut[:,0])
+			signal = profData#[]
+			if options.auto_diff:
+				if options.bInterp:
 					try:
-						signal = profData - sp.mean(bOut[:,1])
+						
+						signal = profData - bgData(abs(angle))/5
+						if (signal<0).sum()>100:
+							signal = profData - bOut[:,1].mean()
+							if (signal<0).sum()>100:
+								signal = 10**-9
+						print(signal.min())
+						print("="*20)
 					except:
 						traceback.print_exc()
-					print(signal.min())
-			elif options.bDict:
-				try:
-					
-					signal = abs(profData - bDict[angle])
-					print(signal.min())
-					print("="*20)
-				except:
-					traceback.print_exc()
-					print(angle)
-					
+						print(angle)
+						print(sp.mean(bOut[:,1]), type(bOut))
+						print( angle, bOut[:,0])
+						try:
+							signal = profData - sp.mean(bOut[:,1])
+						except:
+							traceback.print_exc()
+						print(signal.min())
+				elif options.bDict:
 					try:
-						signal = profData - sp.mean(bOut[:,1])
+						
+						signal = abs(profData - bDict[angle])
+						print(signal.min())
+						print("="*20)
 					except:
 						traceback.print_exc()
-					print(signal.min())
-			else:
-				signal = profData - bgData.mean()
+						print(angle)
+						
+						try:
+							signal = profData - sp.mean(bOut[:,1])
+						except:
+							traceback.print_exc()
+						print(signal.min())
+				else:
+					signal = profData - bgData.mean()
+				
 
 			#signal = signal * ( ( signal - signal.min() ) > ( signal.max()-signal.min() )/100 )
 			signal /= options.power

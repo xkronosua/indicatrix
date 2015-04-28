@@ -16,7 +16,8 @@ import traceback
 from scipy import ndimage
 from pylab import *
 import signal
-#import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+import matplotlib.pyplot as plt
 
 
 
@@ -87,11 +88,15 @@ parser.add_option("-g","--gaussfilt", dest="gaussfilt", help="use gauss filter",
 parser.add_option("--bounds", dest="bounds", help="cut min and max", default='x', action="store")
 parser.add_option("--optimBounds", dest="optimBounds", help="optimization bounds", default='-10,10,0,50', action="store")
 parser.add_option("--xyOptim", dest="xyOptim", help="optimization by x and y", action="store_true")
-parser.add_option("--power", dest="power", help="P_out", default=1., type='float', action="store")
+parser.add_option("--power", dest="power", help="P_out", default=-1., type='float', action="store")
+parser.add_option("-e", "--exposure", dest="exposure", help="exposure value. -1 for auto", default=-1, type='float', action="store")
 
 (options, args) = parser.parse_args()
 
 print( options, args)
+
+
+gf = [ float(i) for i in options.gaussfilt.split('x')]
 
 #print theta_range
 def cut_minmax(data, bounds):
@@ -120,6 +125,19 @@ def maxPos(data, lim=(50,-50)):
 	w = sp.where(data==data.max())
 
 
+def sort_by_angle(files):
+
+	out = []
+	print(files)
+	for i in files:
+		header = pf.open(i)
+		angle = float(header[0].header['ANGLE'])
+		out.append(angle)
+	angle = sp.array(out)
+	files = sp.array(files, dtype=str)
+	files = files[angle.argsort()]
+	return files
+
 def getData(Dir,  bgfile=''):
 	#################################################################
 
@@ -129,7 +147,7 @@ def getData(Dir,  bgfile=''):
 		bounds = []
 
 	# Знайдемо кут, що захоплює матриця
-	MATRIX_SIZE = [494.*7.4*10**-4, 659.*7.4*10**-4]	# см
+	MATRIX_SIZE = [0.36, 0.49]#[494.*7.4*10**-4, 659.*7.4*10**-4]	# см
 	theta = sp.degrees( sp.arctan(MATRIX_SIZE[1]/options.DIST))/2.
 	print( "theta: %f"%theta)
 	N = options.N	# кількість смуг
@@ -165,9 +183,14 @@ def getData(Dir,  bgfile=''):
 					data = data / bgFilt
 					bname = background.header['OBJECT']
 					print(bname, bgFilt)
-					angle = float(bname[:].split('_')[0])
+					angle = float(background.header['ANGLE'])
+					print("angle : {:.3f}".format(angle))
 					if options.zero:
 						angle -= (angle>180)*360
+					if options.exposure != -1:
+						data /= float(options.exposure)*1000
+					else :
+						data /= float(background.header['EXPTIME'])*1000
 					bOut.append([angle, data.mean()])
 					bDict[angle] = data/10
 
@@ -175,8 +198,8 @@ def getData(Dir,  bgfile=''):
 				bOut = bOut[bOut[:,0].argsort()]
 				#plt.plot(bOut[:,0],bOut[:,1])
 				#plt.show(False)
-				bgData = sp.poly1d(sp.polyfit(bOut[:,0],bOut[:,1], 7))
-				print(bDict.keys())
+				bgData = interp1d(bOut[:,0],bOut[:,1])
+				#print(bDict.keys())
 				plot(bOut[:,0],bOut[:,1],'o', bOut[:,0],bgData(bOut[:,0]))
 				show()
 			else:
@@ -198,10 +221,11 @@ def getData(Dir,  bgfile=''):
 		#if options.medfilt:
 		#	bgData = medfilt2d(bgData)
 
-		fileList = glob.glob(os.path.join(Dir,"*",'*.fits'))
+		fileList = sort_by_angle(glob.glob(os.path.join(Dir,"*",'*.fits')))
 		out = []
-		sort_nicely(fileList)
+		#sort_nicely(fileList)
 		#profFilt = 1.
+
 		for f in fileList:
 			try:
 				profData = None
@@ -225,19 +249,19 @@ def getData(Dir,  bgfile=''):
 					continue
 
 				
-				try:
-					degrees, minutes = profName.split('_')
-					angle = float(degrees) + float(minutes) / 60.
-					if options.zero:
-						angle -= (angle>180)*360
-				except ValueError:
-					traceback.print_exc()
-					continue
+				angle = float(prof[-1].header['ANGLE'])
+				print("angle : {:.3f}".format(angle))
+				if options.zero:
+					angle -= (angle>180)*360
+				if options.exposure != -1:
+					profData /= float(options.exposure)*1000
+				else :
+					profData /= float(prof[-1].header['EXPTIME'])*1000
 				signal = []
 				if options.bInterp:
 					try:
 						
-						signal = (profData -  bDict[angle])#bgData(angle))
+						signal = (profData - bgData(abs(angle)))
 						print(signal.min())	
 						print('='*50)
 					except:
@@ -257,7 +281,7 @@ def getData(Dir,  bgfile=''):
 				signal /= options.power
 
 
-				gf = [ float(i) for i in options.gaussfilt.split('x')]
+				
 				if gf != [0,0]:
 					signal = ndimage.gaussian_filter(signal, gf)
 
@@ -270,7 +294,7 @@ def getData(Dir,  bgfile=''):
 				
 				
 				t = angle + theta_range[::-1]
-				out.append([t, signal])
+				out.append([t, signal[::-1].T[::-1].T])
 			except KeyboardInterrupt:
 				break
 	#	if len(out)>=1 and not options.zero is None: out[:,0] = out[:,0]-(out[:,0]>180)*360
@@ -303,44 +327,53 @@ def test(n1,n2,eps=0.5, show=True, returnAll=False):
 	x1, data1 = OUT['res'][n1]
 	x2, data2 = OUT['res'][n2]
 	w1 = sp.where(x1>=x2.min())[0]
+	
 	w2 = sp.where(x2<=x1.max())[0]
+	
 
 	y = sp.arange(data1.shape[0], dtype='i')-247//2
 	L = abs(x1.min()-x1.max())
 	N = data1.shape[1]
 	m = data1.shape[0]
 	#x1,x2 = x1*100, x2*100
-	l = len(w1)//2
-	errorfunction = lambda p: 1/2/N/m*sum((data1[20:-20,w1[l//2:-l//2]]-data2[(20+int(p[0])):(-20+int(p[0])),w2[l:] - int(p[1])])**2)
+	l = len(w1)//40
+	width = 50
+	errorfunction = lambda p: 1/2/N/m*sum((data1[width:-width,w1[l//2:-l//2]]-data2[(width+int(p[0])):(-width+int(p[0])),w2[l:] - int(p[1])])**2)
 	
-	efunc1 = lambda p: 1/2/N/m*sum((data1[20:-20,w1[l//2:-l//2]]-data2[(20):(-20),w2[l:] - int(p)])**2)
-	efunc2 = lambda p: 1/2/N/m*sum((data1[20:-20,w1[l//2:-l//2]]-data2[(20+int(p)):(-20+int(p)),w2[l:] ])**2)
+	
+	
 	
 	res = [[0,0],0]
 	try:
-		if options.xyOptim:
-			r1 = optimize.minimize_scalar(efunc1, method='bounded', bounds=optimBounds[1])
-			r2 = optimize.minimize_scalar(efunc2, method='bounded', bounds=optimBounds[0])
-			res = [[r2.x,r1.x],0]
+		if not len(w1[l//2:-l//2])<3:
+			if options.xyOptim:
+				efunc1 = lambda p: 1/2/N/m*sum((sp.log10(abs(data1[width:-width,w1[l//2:-l//2]]))-sp.log10(abs(data2[(width):(-width),w2[l:] - int(p)])))**2)
+				r1 = optimize.minimize_scalar(efunc1, method='bounded', bounds=optimBounds[1])
+				efunc2 = lambda p: 1/2/N/m*sum((data1[width:-width,w1[l//2:-l//2]]-data2[(width+int(p)):(-width+int(p)),w2[l:]-int(r1.x) ])**2)
+				r2 = optimize.minimize_scalar(efunc2, method='bounded', bounds=optimBounds[0])
+				res = [[r2.x,r1.x],0]
+			else:
+				res = optimize.fmin_tnc(errorfunction, approx_grad=1, x0=[0,len(w1)],
+					bounds=(optimBounds[0], optimBounds[1]), epsilon=eps, fmin=errorfunction((0,50))/5, disp=0)
 		else:
-			res = optimize.fmin_tnc(errorfunction, approx_grad=1, x0=[-8,len(w1)],
-				bounds=(optimBounds[0], optimBounds[1]), epsilon=eps, fmin=errorfunction((0,0))/10, disp=0)
+			print('maskError')
 	except:
 		traceback.print_exc()
 		
 	
 	p = res[0]
 	print(p, end=" ")
-	step = abs(x1[1]-x1[0])
+	step = 	abs(x1[1]-x1[0])
 	nx = (l + p[1])/2//step
 	print(-step**2*nx)
 	X1, Y1, X2, Y2 = x1, y, x2-step**2*nx, y-int(res[0][0])
-	'''
+	
 	if show:
-		mpl.contourf(X1,Y1,data1,50 , cmap=cm.gist_heat_r)
-		mpl.contour(X2,Y2,data2,40,cmap=cm.hsv)
-		input("next")
-	'''
+		plt.contourf(X1,Y1,data1,30 , cmap=cm.gist_heat_r)
+		plt.contour(X2,Y2,data2,30,cmap=cm.hsv)
+		plt.show(1)
+		#input("next")
+	
 	#if not returnAll:
 	try:
 		return n2, (-nx*step**2-(x1[w1].max() - x1[w1].min()))*N/L, -int(res[0][0]/2), (-nx*step**2-(x1[w1].max() - x1[w1].min()))
@@ -365,7 +398,7 @@ if __name__ == "__main__":
 	'''
 
 	OUT = {'res': out}
-	#del out
+	del out
 
 	a,b = OUT['res'][0][1].shape
 
@@ -373,7 +406,7 @@ if __name__ == "__main__":
 	for i in range(len(OUT['res'])-1):
 		print (i, end=" ")
 		#input(">")
-		r.append(test(i,i+1,1,False))
+		r.append(test(i,i+1,1,options.plot))
 
 	r = sp.array(r)
 
@@ -385,7 +418,8 @@ if __name__ == "__main__":
 	print(q[-1])
 	shiftY_min, shiftY_max = q[:,2].min(), q[:,2].max()
 
-	d = sp.zeros((a + shiftY_max*(shiftY_max>0) + shiftY_min*(shiftY_min<0)+100, b*(len(r)+1) + q[:,1][-1]))
+	d = np.memmap(os.path.join(options.dir,options.outFile+'.npy'), dtype='float32', mode='w+', shape=(a + shiftY_max*(shiftY_max>0) + shiftY_min*(shiftY_min<0)+100, b*(len(r)+1) + q[:,1][-1]))#sp.zeros((a + shiftY_max*(shiftY_max>0) + shiftY_min*(shiftY_min<0)+100, b*(len(r)+1) + q[:,1][-1]))
+	
 	x = sp.linspace(min([OUT['res'][0][0].min(), OUT['res'][-1][0].min()]), max([OUT['res'][0][0].max(), OUT['res'][-1][0].max()])+q[-1,3], d.shape[1])
 	y_start = shiftY_min*(shiftY_min<0)+50
 	for j,i in enumerate(q):
@@ -411,9 +445,10 @@ if __name__ == "__main__":
 				if not_empty.sum()!=0:
 					if (data_new*not_empty).sum()/not_empty.sum() < (data_old*not_empty).sum()/not_empty.sum():
 						mask2, mask1 = mask1, mask2
-				div = ndimage.gaussian_filter((data_new*mask1 + data_old*mask2)/2 ,(2,2),mode='nearest')*not_empty
+				div = ndimage.gaussian_filter((data_new*mask1 + data_old*mask2)/2 ,gf,mode='nearest')*not_empty
 			except ValueError:
 				print(j)
+				traceback.print_exc()
 				traceback.print_exc()
 			
 				
@@ -427,15 +462,18 @@ if __name__ == "__main__":
 			try:
 				d[(i[2]+y_start):(a+i[2]+y_start), (b*j+i[1]):(b*(j+1)+i[1]) ] = data_new * (-not_empty) +  div
 			except ValueError:
+				traceback.print_exc()
 				d[(i[2]+y_start):(a+i[2]+y_start), (b*j+i[1]):(b*(j+1)+i[1]) ] = data_old*0
 		except:
 			traceback.print_exc()
 			continue
+		d.flush()
+		print(j)
 	print(d.shape)
 
 	y = sp.arange(len(d))
 	a1 = (y[d[:,0]>0]).mean()
-	a2 = (y[d[:,-b*5]>0]).mean()
+	a2 = (y[d[:,b*2]>0]).mean()
 	k = (a2-a1)/d.shape[1]
 	#rotated = d
 	try:
@@ -447,21 +485,22 @@ if __name__ == "__main__":
 			if not sp.isnan(a1).sum():
 				rotated = rotated[int((a1 - a/2)): int(a1+ a/2),:]
 		except:
+			traceback.print_exc()
 			w=where(d[60:-60,:]==d[60:-60,:].max())
-			savetxt(os.path.join(options.dir, "res_xy.dat"),vstack((x-x[w[1][0]],ndimage.gaussian_filter(d[60:-60,:],(7,7))[w[0],:])).T)
+			savetxt(os.path.join(options.dir, "res_xy.dat"),vstack((x-x[w[1][0]],ndimage.gaussian_filter(d[60:-60,:],(1,1))[w[0],:])).T)
 		
 			traceback.print_exc()
-		sp.save(os.path.join(options.dir, "res"), rotated)
+		sp.save(os.path.join(options.dir, "res"+str(d.shape)), rotated)
 	except:
-		
+		traceback.print_exc()
 		sp.save(os.path.join(options.dir, "res"), d)
 
 	sp.save(os.path.join(options.dir, "res_x"), x)
 
 	try:
 		w=where(rotated[60:-60,:]==rotated[60:-60,:].max())	
-		savetxt(os.path.join(options.dir, "res_xy1.dat"),vstack((x,rotated[60:-60,:][w[0],:])).T)
-		rr =  ndimage.gaussian_filter(rotated[60:-60,:],(7,7))[w[0],:]
+		#savetxt(os.path.join(options.dir, "res_xy1.dat"),vstack((x,rotated[60:-60,:][w[0],:])).T)
+		rr =  ndimage.gaussian_filter(rotated[60:-60,:],(1,1))[w[0],:]
 		#print(rr.shape)
 		savetxt(os.path.join(options.dir, "res_xy.dat"),vstack((x-x[w[1][0]],rr)).T)
 	except:
