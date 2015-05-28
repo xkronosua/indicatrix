@@ -14,7 +14,7 @@ import traceback
 from scipy import ndimage
 import matplotlib.pyplot as plt
 
-
+from pathlib import Path
 
 ##### sorting names #####
 
@@ -36,6 +36,12 @@ def sort_nicely(l):
     """ Sort the given list in the way that humans expect.
     """
     l.sort(key=alphanum_key)
+
+class bcolors:
+	WARNING = '\033[95m'
+	ENDC = '\033[0m'
+	ANGLE = '\033[1;92m'
+
 
 ##### sorting names #####
 
@@ -85,7 +91,8 @@ parser.add_option("-g", "--gaussfilt", dest="gaussfilt", help="use gauss filter"
 parser.add_option("--bounds", dest="bounds", help="cut min and max", default='x', action="store")
 parser.add_option("--power", dest="power", help="P_out", default=-1., type='float', action="store")
 parser.add_option("-e", "--exposure", dest="exposure", help="exposure value. -1 for auto", default=-1, type='float', action="store")
-parser.add_option("--auto_diff", dest="auto_diff", help="Diff with background", action="store_true")
+parser.add_option("--no_auto_diff", dest="no_auto_diff", help="Diff with background", action="store_true")
+parser.add_option("--direction", dest="direction", help="Direction of movement", default=0, type='int', action="store")
 
 
 
@@ -127,6 +134,26 @@ def filtCalc(filters, filtTable=None):
 	else:
 		return 1.
 
+def sort_by_angle(files):
+
+	out = []
+	#print(files)
+	for i in files:
+		try:
+			header = pf.open(i)
+		except OSError:
+			traceback.print_exc()
+			continue
+		try:	
+			angle = float(header[0].header['ANGLE'])
+		except KeyError:
+			traceback.print_exc()
+			continue
+		out.append(angle)
+	angle = sp.array(out)
+	files = sp.array(files, dtype=str)
+	files = files[angle.argsort()]
+	return files
 
 def getData(Dir, theta_range, bgfile=''):
 	sh = []
@@ -149,31 +176,37 @@ def getData(Dir, theta_range, bgfile=''):
 		data = []
 		if bgfile:
 			if options.bInterp:
-				backgrounds = glob.glob(bgfile)
-				
 
+				backgrounds = []#glob.glob(bgfile)
+				for file_path in Path(bgfile).glob('**/*.fits'):
+					backgrounds.append(str(file_path))
+				backgrounds = sort_by_angle(backgrounds)
+				#print(backgrounds)
 				for i in backgrounds:
 					background = pf.open(i)[0]
 					data = background.data
-					print( sp.shape(data))
+					print( sp.shape(data),end=" | ")
 					if 'FILTER' in  background.header.keys():
 						bgFilt = filtCalc(background.header['FILTER'], filtTable)
 					else:
+						print(background.header.keys())
 						bgFilt = 1.
 					data = data / bgFilt
 
 					if options.exposure != -1:
 						data /= float(options.exposure)*1000
 					else :
-						data /= float(background.header['EXPTIME'])*1000
-			
+						try:
+							data /= float(background.header['EXPTIME'])*1000
+						except:
+							data /= float(background.header['EXPOSURE'])*1000
 					
 					bname = background.header['OBJECT']
-					print(bname, i)
+					print(bname, i, end = " | ")
 					try:
 						angle = float(background.header['ANGLE'])
-						print("angle : {:.3f}".format(angle))
-						bOut.append([angle, data.mean()])
+						print(bcolors.ANGLE+"angle : {:.3f}".format(angle)+bcolors.ENDC)
+						bOut.append([angle, data.mean()]) #(data.mean()+data.min())/4.])
 					except:
 						traceback.print_exc()
 				bOut = sp.array(bOut)
@@ -187,12 +220,12 @@ def getData(Dir, theta_range, bgfile=''):
 			elif options.bDict:
 				backgrounds = glob.glob(bgfile)
 				
-				print(backgrounds)
+				#print(backgrounds)
 				for i in backgrounds:
-					print(i)
+					print(i, end=" | ")
 					background = pf.open(i)[0]
 					data = background.data
-					print( sp.shape(data))
+					print( sp.shape(data), end=" | ")
 					if 'FILTER' in  background.header.keys():
 						bgFilt = filtCalc(background.header['FILTER'], filtTable)
 					else:
@@ -200,12 +233,11 @@ def getData(Dir, theta_range, bgfile=''):
 						bgFilt = 1.
 					data = data / bgFilt
 					bname = background.header['OBJECT']
-					print(bname, bgFilt, i)
+					print(bname, bgFilt, i, end=" | ")
 					try:
 						angle = float(background.header['ANGLE'])
-						print("angle : {:.3f}".format(angle))
-						if options.zero:
-							angle -= (angle>180)*360
+						print(bcolors.ANGLE+"angle : {:.3f}".format(angle)+bcolors.ENDC)
+						#if not options.zero:							angle -= (angle>180)*360
 						bOut.append([angle, data.mean()])
 						bDict[angle] = data
 					except:
@@ -215,10 +247,10 @@ def getData(Dir, theta_range, bgfile=''):
 				bOut = bOut[bOut[:,0].argsort()]
 			else:
 				background = pf.open(glob.glob(bgfile)[0])[0]
-				print( background.data	)
+				print( background.data, end=" | ")
 				data = pf.getdata(glob.glob(bgfile)[0])#background.data
 				
-				print( sp.shape(data))
+				print( sp.shape(data), end=" | ")
 				if 'FILTER' in  background.header.keys():
 					bgFilt = filtCalc(background.header['FILTER'], filtTable)
 				else:
@@ -232,26 +264,27 @@ def getData(Dir, theta_range, bgfile=''):
 			
 				
 		else:
-			print('No BG')
+			print("\033[1;41m"+'No BG'+bcolors.ENDC)
 			pass
 		sh = sp.shape(data)
 		#if options.medfilt:
 		#	bgData = medfilt2d(bgData)
 		#print(bgData)
-		bOut[:,1] /= options.power
-		sp.savetxt(os.path.join(Dir,"Bg.dat"),bOut)
-		fileList = glob.glob(os.path.join(Dir,"*",'*.fits'))
-		out = []
-		sort_nicely(fileList)
+		#bOut[:,1] /= options.power
 		
+		fileList = sort_by_angle(glob.glob(os.path.join(Dir,"*",'*.fits')))
+		#fileList = glob.glob(os.path.join(Dir,"*",'*.fits'))
+		out = []
+		#sort_nicely(fileList)
+		Power = 0
 		for f in fileList:
 			profData = None
-			print(f)
+			print(f,end = " | ")
 			try:
 				prof = pf.open(f)
 				profData = prof[-1].data
 				if 'FILTER' in prof[-1].header.keys():
-					print ("\033[1;41m", prof[-1].header['FILTER'], "\033[1;m")
+					print ("\033[1;41m", prof[-1].header['FILTER'], "\033[1;m", end="\t")
 					profFilt = filtCalc(prof[-1].header['FILTER'], filtTable)
 				else:
 					profFilt = 1.
@@ -260,10 +293,9 @@ def getData(Dir, theta_range, bgfile=''):
 					angle = float(prof[-1].header['ANGLE'])
 				except:
 					traceback.print_exc()
-					print (f)
+					print("\033[1;41m","ANGLEError: ",f , bcolors.ENDC)
 					continue
-				print(f)
-				print("angle : {:.3f}".format(angle))
+				print("\t",bcolors.ANGLE,"angle : {:.3f}".format(angle),bcolors.ENDC, end="\t")
 				profData = cut_minmax(profData, bounds)
 
 
@@ -300,17 +332,17 @@ def getData(Dir, theta_range, bgfile=''):
 			'''
 			
 			signal = profData#[]
-			if options.auto_diff:
+			if not options.no_auto_diff:
 				if options.bInterp:
 					try:
 						
 						signal = profData - bgData(abs(angle))/5
 						if (signal<0).sum()>100:
 							signal = profData - bOut[:,1].mean()
-							if (signal<0).sum()>100:
-								signal = 10**-9
-						print(signal.min())
-						print("="*20)
+							#if (signal<0).sum()>100:
+							#	signal = 10**-9
+						print(signal.shape, end=" |\t")
+						#print("="*20,end='\t')
 					except:
 						traceback.print_exc()
 						print(angle)
@@ -338,10 +370,16 @@ def getData(Dir, theta_range, bgfile=''):
 						print(signal.min())
 				else:
 					signal = profData - bgData.mean()
-				
+			else:
+				pass
 
 			#signal = signal * ( ( signal - signal.min() ) > ( signal.max()-signal.min() )/100 )
-			signal /= options.power
+			if options.power != -1:
+				signal /= float(options.power)
+				Power = float(options.power)
+			else :
+				signal /= float(prof[-1].header['POWER'])
+				Power = float(prof[-1].header['POWER'])
 
 			gf = [ int(i) for i in options.gaussfilt.split('x')]
 			signal = ndimage.gaussian_filter(signal, gf)
@@ -370,8 +408,10 @@ def getData(Dir, theta_range, bgfile=''):
 				#stripes = sp.array_split(signal, N, axis=1)
 				#for i in range(len(stripes)):
 				#	out.append([t[i]]+stripes[::-1][i].T.tolist()[0])
-			
-			tt = sp.vstack((t[::-1],signal)).T
+			if options.direction==1:
+				tt = sp.vstack((t[::-1],signal)).T
+			else:
+				tt = sp.vstack((t,signal)).T
 			print(sp.shape(tt),)
 				
 			out.append(tt)
@@ -399,6 +439,7 @@ def getData(Dir, theta_range, bgfile=''):
 				os.system('sh ./plotmap.sh ' + tmpName)
 				os.remove(tmpName)
 			'''
+			print("")
 	print(sh)	
 	if options.panorama :
 		try:
@@ -408,7 +449,15 @@ def getData(Dir, theta_range, bgfile=''):
 	else:
 		out = sp.array(out)
 	#out = out.astype('int64')
-	if len(out)>=1 and not options.zero: out[:,0] = out[:,0]+(out[:,0]<180)*360
+	#if len(out)>=1 and not options.zero: out[:,0] = out[:,0]+(out[:,0]<180)*360
+	if options.no_auto_diff:
+		
+		if options.power != -1:
+			bOut[:,1] /= Power
+		else:
+			bOut[:,1] /= Power
+		print("Power=%f"%Power)
+		sp.savetxt(os.path.join(Dir,"Bg.dat"),bOut)	
 	#out[:,1] = out[:,1] + 10**9
 	#print errList,"\nLen:\n\tjournal = " + str(len(journal)) + "\tout = " + str(len(out))
 	#if options.average and len(theta_range)>1:
@@ -434,6 +483,7 @@ if __name__ == "__main__":
 	else:
 		theta_range = sp.linspace(-theta, theta, N)
 	'''
+	print( options, args)
 	A, step = getData(options.dir, theta_range, options.background)
 	print(sp.shape(A))
 	print( theta_range[-1]-theta_range[0])
