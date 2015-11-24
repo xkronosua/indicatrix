@@ -9,7 +9,7 @@ if __name__ == "__main__":
 	a = []
 	for i in files:
 		#print(i)
-		header = pf.open(i)#, mode='update')
+		header = pf.open(i, mode='update')
 		n = int(header[0].header['FRAMENO'])
 
 		angle = float(header[0].header['ANGLE'])

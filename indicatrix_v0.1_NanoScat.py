@@ -93,6 +93,7 @@ parser.add_option("--power", dest="power", help="P_out", default=-1., type='floa
 parser.add_option("-e", "--exposure", dest="exposure", help="exposure value. -1 for auto", default=-1, type='float', action="store")
 parser.add_option("--no_auto_diff", dest="no_auto_diff", help="Diff with background", action="store_true")
 parser.add_option("--direction", dest="direction", help="Direction of movement", default=0, type='int', action="store")
+parser.add_option("--PDdata", dest="PDdata", help="file with PD data", default="", type='string', action="store")
 
 
 
@@ -164,6 +165,11 @@ def getData(Dir, theta_range, bgfile=''):
 	except ValueError:
 		bounds = []
 
+	PDdata = None
+	PD0_interp = None
+	if options.PDdata:
+		PDdata = sp.loadtxt(options.PDdata)
+		PD0_interp = interp.interp1d(PDdata[:,0], PDdata[:,1],bounds_error=False,fill_value=1)
 
 
 	if os.path.exists(Dir):
@@ -378,8 +384,14 @@ def getData(Dir, theta_range, bgfile=''):
 				signal /= float(options.power)
 				Power = float(options.power)
 			else :
-				signal /= float(prof[-1].header['POWER'])
-				Power = float(prof[-1].header['POWER'])
+				if options.PDdata:
+					pow_correction = PD0_interp(angle)
+					signal /= float(prof[-1].header['POWER'])*pow_correction
+					Power = float(prof[-1].header['POWER'])*pow_correction
+
+				else:
+					signal /= float(prof[-1].header['POWER'])
+					Power = float(prof[-1].header['POWER'])
 
 			gf = [ int(i) for i in options.gaussfilt.split('x')]
 			signal = ndimage.gaussian_filter(signal, gf)
